@@ -1,6 +1,8 @@
 ActiveRecord::Schema.define(:version => 0) do
   create_table :articles, :force => true do |t|
     t.string :title
+    t.string :description
+    t.text :text
   end
 
   create_table :article_translations, :force => true do |t|
@@ -12,6 +14,7 @@ ActiveRecord::Schema.define(:version => 0) do
 
   create_table :teams, :force => true do |t|
     t.string :title
+    t.text :text
   end
 
   create_table :team_translations, :force => true do |t|
@@ -21,14 +24,8 @@ ActiveRecord::Schema.define(:version => 0) do
   end
 end
 
-class ArticleTranslation < ActiveRecord::Base
-end
-
 class Article < ActiveRecord::Base
   translations :description, :text, :writer => true
-end
-
-class TeamTranslation < ActiveRecord::Base
 end
 
 class Team < ActiveRecord::Base

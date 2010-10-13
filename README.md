@@ -1,8 +1,9 @@
 LolitaHasTranslations
 ======================
 
-This is a fork of http://github.com/dmitry/has_translations with small changes. The main difference is 
-that the translations table holds only translations, but not the original data from default_locale, so:
+This is a fork of http://github.com/dmitry/has_translations with small changes.
+
+1. The main difference is that the translations table holds only translations, but not the original data from default_locale, so:
 
     I18n.default_locale = :en
     I18n.locale = :lv
@@ -19,8 +20,10 @@ that the translations table holds only translations, but not the original data f
     a.title
     => "Title in LV"
 
-And other addition is that when a "find" is executed and current language is not the same as default language then :translations are added to :includes
+2. When a "find" is executed and current language is not the same as default language then :translations are added to :includes
 to pre fetch all translations.
+
+3. The "ModelNameTranslation" class is created for you automaticly with all validations for ranslated fields. Of course you can create it manualy for custom vlidations and other.
 
 
 HasTranslations v0.3.1

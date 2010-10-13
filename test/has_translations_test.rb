@@ -1,4 +1,5 @@
-require 'test_helper'
+# encoding: utf-8
+require File.dirname(__FILE__) + '/test_helper.rb'
 
 class HasTranslationsTest < Test::Unit::TestCase
   def setup
@@ -22,11 +23,11 @@ class HasTranslationsTest < Test::Unit::TestCase
   end
 
   def test_reader_text_for_a_given_locale
-    article = Article.create!
-    article_translation = ArticleTranslation.create!(:article => article, :locale => 'en', :description => 'desc', :text => 'text')
-    assert_not_equal article.text, article_translation.text
+    article = Article.create!(:description => 'ru desc', :text => 'ru text')
+    article.translations.create!(:locale => 'en', :description => 'en desc', :text => 'en text')
+    assert_equal article.text, 'ru text'
     I18n.locale = :en
-    assert_equal article.text, article_translation.text
+    assert_equal article.text, 'en text'
   end
 
   def test_writer_text_for_a_given_locale
@@ -64,9 +65,9 @@ class HasTranslationsTest < Test::Unit::TestCase
   end
 
   def test_fallback_and_nil_options
-    article = Article.create!
+    article = Article.create! :text => ''
     assert_equal '', article.text
-    team = Team.create!
+    team = Team.create! :text => ''
     assert_equal nil, team.text
     first_translation = TeamTranslation.create!(:team => team, :locale => 'es', :text => 'text')
     assert_equal first_translation.text, team.reload.text
