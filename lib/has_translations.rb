@@ -100,6 +100,18 @@ class ActiveRecord::Base
       find_translation(locale) || (build ? self.translations.build(:locale => locale) : self.translations.new(:locale => locale))
     end
 
+    # adds :translations to :includes if current locale differs from default
+    class << self
+      alias_method :find_every_without_translations, :find_every
+      def find_every(*args)
+        if args[0].kind_of?(Hash)
+          args[0][:include] ||= []
+          args[0][:include] << :translations
+        end unless I18n.locale == I18n.default_locale
+        find_every_without_translations(*args)
+      end
+    end
+    
     def translation(locale, fallback=has_translations_options[:fallback])
       locale = locale.to_s
       find_translation(locale) || (fallback && !translations.blank? ? translations.detect { |t| t.locale == I18n.default_locale.to_s } || translations.first : nil)
@@ -119,8 +131,12 @@ class ActiveRecord::Base
     if options[:reader]
       attrs.each do |name|
         send :define_method, name do
-          translation = self.translation(I18n.locale)
-          translation.nil? ? has_translations_options[:nil] : translation.send(name)
+          unless I18n.default_locale == I18n.locale
+            translation = self.translation(I18n.locale)
+            translation.nil? ? has_translations_options[:nil] : translation.send(name)
+          else
+            self[name]
+          end
         end
       end
     end
@@ -128,8 +144,12 @@ class ActiveRecord::Base
     if options[:writer]
       attrs.each do |name|
         send :define_method, "#{name}=" do |value|
-          translation = find_or_build_translation(I18n.locale, true)
-          translation.send(:"#{name}=", value)
+          unless I18n.default_locale == I18n.locale
+            translation = find_or_build_translation(I18n.locale, true)
+            translation.send(:"#{name}=", value)
+          else
+            self[name] = value
+          end
         end
       end
     end

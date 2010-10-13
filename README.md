@@ -1,3 +1,28 @@
+LolitaHasTranslations
+======================
+
+This is a fork of http://github.com/dmitry/has_translations with small changes. The main difference is 
+that the translations table holds only translations, but not the original data from default_locale, so:
+
+  I18n.default_locale = :en
+  I18n.locale = :lv
+
+  a = Article.create :title => "Title in EN"
+  a.title
+  # returns blank, because current locale is LV and there is no translation in it
+  => ""
+  I18n.locale = :en
+  a.title
+  => "Title in EN"
+  a.translations.create :title => "Title in LV", :locale => 'lv'
+  I18n.locale = :lv
+  a.title
+  => "Title in LV"
+
+And other addition is that when a "find" is executed and current language is not the same as default language then :translations are added to :includes
+to pre fetch all translations.
+
+
 HasTranslations v0.3.1
 ======================
 
