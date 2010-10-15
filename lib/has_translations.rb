@@ -119,6 +119,8 @@ class ActiveRecord::Base
         klass = name.constantize rescue nil
         unless klass
           klass = create_class(name, Object, ActiveRecord::Base) do
+            # set's real table name
+            set_table_name name.sub('Translation','').constantize.table_name.singularize + "_translations"
             cattr_accessor :translate_attrs, :master_id
             # override validate to vaidate only translate fields from master Class
             def validate
