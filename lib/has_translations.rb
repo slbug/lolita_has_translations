@@ -134,9 +134,15 @@ class ActiveRecord::Base
               end
               item.class.set_table_name was_table_name
             end
+            # sets real master_id it's aware of STI
+            def self.extract_master_id name
+              master_class = name.sub('Translation','').constantize
+              class_name = !master_class.superclass.abstract_class? ? master_class.superclass.name : master_class.name
+              self.master_id = :"#{class_name.demodulize.underscore}_id"
+            end
           end
           klass.translate_attrs = attrs
-          klass.master_id = :"#{name.sub('Translation','').demodulize.underscore}_id"
+          klass.extract_master_id(name)
         end
         klass
       end
@@ -171,27 +177,15 @@ class ActiveRecord::Base
       end
     end
 
-    translation_class_name = "#{self.model_name}Translation"
+    translation_class_name = "#{self.name}Translation"
     translation_class = self.define_translation_class(translation_class_name, attrs)
-    belongs_to = self.model_name.demodulize.underscore.to_sym
+    belongs_to = self.name.demodulize.underscore.to_sym
 
     write_inheritable_attribute :has_translations_options, options
     class_inheritable_reader :has_translations_options
 
     write_inheritable_attribute :columns_has_translations, columns.collect{|col| col if attrs.include?(col.name.to_sym)}.compact
     class_inheritable_reader :columns_has_translations
-
-    # Returns the same object, but displays default values
-    # if current locale != default locale but you want to get the real values not translations in current language
-    # I18n.default_locale = :en
-    # I18n.locale = :lv
-    # a = Article.find(5).raw
-    # a.title
-    #=> "EN title"
-    def raw
-      @return_raw_data = true
-      self
-    end
 
     # forces given locale
     # I18n.locale = :lv
@@ -232,7 +226,7 @@ class ActiveRecord::Base
       if (I18n.available_locales.size - 1) > self.translations.size
         I18n.available_locales.clone.delete_if{|l| l == I18n.default_locale}.each do |l|
           options = {:locale => l.to_s}
-          options[:"#{self.class.name.demodulize.underscore}_id"] = self.id unless self.new_record?
+          options[self.class.reflections[:translations].class_name.constantize.master_id] = self.id unless self.new_record?
           self.translations.build(options) unless self.translations.map(&:locale).include?(l.to_s)
         end
       end
@@ -277,11 +271,11 @@ class ActiveRecord::Base
     #      end
     #    end
 
-    has_many :translations, :class_name => translation_class_name, :dependent => :destroy
+    has_many :translations, :class_name => translation_class_name, :foreign_key => translation_class.master_id, :dependent => :destroy
     accepts_nested_attributes_for :translations, :allow_destroy => true, :reject_if => proc { |attributes| columns_has_translations.collect{|col| attributes[col.name].blank? ? nil : 1}.compact.empty? }
     translation_class.belongs_to belongs_to
     translation_class.validates_presence_of :locale
-    translation_class.validates_uniqueness_of :locale, :scope => :"#{belongs_to}_id"
+    translation_class.validates_uniqueness_of :locale, :scope => translation_class.master_id
 
     # Workaround to support Rails 2
     scope_method = if ActiveRecord::VERSION::MAJOR < 3 then :named_scope else :scope end
