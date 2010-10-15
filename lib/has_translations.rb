@@ -1,41 +1,3 @@
-module HasTranslationsExtras
-  def self.included(base)
-    class << base
-      def create_class(class_name, superclass, &block)
-        klass = Class.new superclass, &block
-        Object.const_set class_name, klass
-      end
-      # defines "ModelNameTranslation" if it's not defined manualy
-      def define_translation_class name, attrs
-        klass = name.constantize rescue nil
-        unless klass
-          klass = create_class(name, ActiveRecord::Base) do
-            cattr_accessor :translate_attrs
-            def validate
-              item = self.class.name.sub('Translation','').constantize.new(self.attributes.clone.delete_if{|k,_| !self.class.translate_attrs.include?(k.to_sym)})
-              item.valid?
-              self.class.translate_attrs.each do |attr|
-                errors_on_attr = item.errors.on(attr)
-                self.errors.add(attr,errors_on_attr) if errors_on_attr
-              end
-            end
-          end
-          klass.translate_attrs = attrs
-        end
-        klass
-      end
-      # adds :translations to :includes if current locale differs from default
-      alias_method(:find_every_without_translations, :find_every) unless method_defined?(:find_every_without_translations)
-      def find_every(*args)
-        if args[0].kind_of?(Hash)
-          args[0][:include] ||= []
-          args[0][:include] << :translations
-        end if nil unless I18n.locale == I18n.default_locale
-        find_every_without_translations(*args)
-      end
-    end
-  end
-end
 class ActiveRecord::Base
   # Provides ability to add the translations for the model using delegate pattern.
   # Uses has_many association to the ModelNameTranslation.
@@ -79,12 +41,11 @@ class ActiveRecord::Base
   # Configuration options:
   # 
   # * <tt>:fallback</tt> - if translation for the current locale not found.
-  #   By default false. Set to true if you want to use reader fallback.
+  #   By default true.
   #   Uses algorithm of fallback:
   #   0) current translation (using I18n.locale);
   #   1) default locale (using I18n.default_locale);
-  #   2) first from translations association;
-  #   3) :nil value (see <tt>:nil</tt> configuration option)
+  #   2) :nil value (see <tt>:nil</tt> configuration option)
   # * <tt>:reader</tt> - add reader attributes to the model and delegate them
   #   to the translation model columns. Add's fallback if it is set to true.
   # * <tt>:writer</tt> - add writer attributes to the model and assign them
@@ -116,33 +77,140 @@ class ActiveRecord::Base
   # <tt>all_translations</tt> method that returns all possible translations in
   # ordered hash (useful when creating forms with nested attributes).
   def self.translations(*attrs)
-    include HasTranslationsExtras
-
     options = {
-      :fallback => false,
+      :fallback => true,
       :reader => true,
       :writer => false,
       :nil => ''
     }.merge(attrs.extract_options!)
-
     options.assert_valid_keys([:fallback, :reader, :writer, :nil])
+    
+    class << self
+      # adds :translations to :includes if current locale differs from default
+      alias_method(:find_every_without_translations, :find_every) unless method_defined?(:find_every_without_translations)
+      def find_every(*args)
+        if args[0].kind_of?(Hash)
+          args[0][:include] ||= []
+          args[0][:include] << :translations
+        end unless I18n.locale == I18n.default_locale
+        find_every_without_translations(*args)
+      end
+      # Defines given class recursively
+      # Example:
+      # create_class('Cms::Text::Page', Object, ActiveRecord::Base)
+      # => Cms::Text::Page
+      def create_class(class_name, parent, superclass, &block)
+        first,*other = class_name.split("::")
+        if other.empty?
+          klass = Class.new superclass, &block
+          parent.const_set(first, klass)
+        else
+          klass = Class.new
+          parent = unless parent.const_defined?(first)
+            parent.const_set(first, klass)
+          else
+            first.constantize
+          end
+          create_class(other.join('::'), parent, superclass, &block)
+        end
+      end
+      # defines "ModelNameTranslation" if it's not defined manualy
+      def define_translation_class name, attrs
+        klass = name.constantize rescue nil
+        unless klass
+          klass = create_class(name, Object, ActiveRecord::Base) do
+            cattr_accessor :translate_attrs, :master_id
+            # override validate to vaidate only translate fields from master Class
+            def validate
+              item = self.class.name.sub('Translation','').constantize.new(self.attributes.clone.delete_if{|k,_| !self.class.translate_attrs.include?(k.to_sym)})
+              was_table_name = item.class.table_name
+              item.class.set_table_name self.class.table_name
+              item.valid?
+              self.class.translate_attrs.each do |attr|
+                errors_on_attr = item.errors.on(attr)
+                self.errors.add(attr,errors_on_attr) if errors_on_attr
+              end
+              item.class.set_table_name was_table_name
+            end
+          end
+          klass.translate_attrs = attrs
+          klass.master_id = :"#{name.sub('Translation','').demodulize.underscore}_id"
+        end
+        klass
+      end
+      # creates translation table and adds missing fields
+      # So at first add the "translations :name, :desc" in your model
+      # then put YourModel.sync_translation_table! in db/seed.rb and run "rake db:seed"
+      # Later adding more fields in translations array, just run agin "rake db:seed"
+      # If you want to remove fields do it manualy, it's safer
+      def sync_translation_table!
+        translations_class = reflections[:translations].class_name.constantize
+        translations_table = translations_class.table_name
+        unless ActiveRecord::Migration::table_exists?(translations_table)
+          ActiveRecord::Migration.create_table translations_table do |t|
+            t.integer translations_class.master_id, :null => false
+            t.string :locale, :null => false, :limit => 5
+            columns_has_translations.each do |col|
+              t.send(col.type,col.name)
+            end
+          end
+          ActiveRecord::Migration.add_index translations_table, [translations_class.master_id, :locale], :unique => true
+          translations_class.reset_column_information
+        else
+          changes = false
+          columns_has_translations.each do |col|
+            unless translations_class.columns_hash.has_key?(col.name)
+              ActiveRecord::Migration.add_column(translations_table, col.name, col.type)
+              changes = true
+            end
+          end
+          translations_class.reset_column_information if changes
+        end
+      end
+    end
 
     translation_class_name = "#{self.model_name}Translation"
     translation_class = self.define_translation_class(translation_class_name, attrs)
-    belongs_to = self.model_name.demodulize.singularize.underscore.to_sym
+    belongs_to = self.model_name.demodulize.underscore.to_sym
 
     write_inheritable_attribute :has_translations_options, options
     class_inheritable_reader :has_translations_options
 
-    send :define_method, :find_or_build_translation do |*args|
+    write_inheritable_attribute :columns_has_translations, columns.collect{|col| col if attrs.include?(col.name.to_sym)}.compact
+    class_inheritable_reader :columns_has_translations
+
+    # Returns the same object, but displays default values
+    # if current locale != default locale but you want to get the real values not translations in current language
+    # I18n.default_locale = :en
+    # I18n.locale = :lv
+    # a = Article.find(5).raw
+    # a.title
+    #=> "EN title"
+    def raw
+      @return_raw_data = true
+      self
+    end
+
+    # forces given locale
+    # I18n.locale = :lv
+    # a = Article.find 18
+    # a.title
+    # => "LV title"
+    # a.in(:en).title
+    # => "EN title"
+    def in locale
+      @locale = locale
+      self
+    end
+    
+    def find_or_build_translation(*args)
       locale = args.first.to_s
       build = args.second.present?
       find_translation(locale) || (build ? self.translations.build(:locale => locale) : self.translations.new(:locale => locale))
     end
 
-    def translation(locale, fallback=has_translations_options[:fallback])
-      locale = locale.to_s
-      find_translation(locale) || (fallback && !translations.blank? ? translations.detect { |t| t.locale == I18n.default_locale.to_s } || translations.first : nil)
+    def translation(locale)
+      find_translation(locale.to_s)
     end
 
     def all_translations
@@ -153,37 +221,62 @@ class ActiveRecord::Base
     end
 
     def has_translation?(locale)
+      return true if locale == I18n.default_locale
       find_translation(locale).present?
+    end
+
+    # if object is new, then nested slaves ar built for all available locales
+    def build_nested_translations
+      if (I18n.available_locales.size - 1) > self.translations.size
+        I18n.available_locales.clone.delete_if{|l| l == I18n.default_locale}.each do |l|
+          options = {:locale => l.to_s}
+          options[:"#{self.class.name.demodulize.underscore}_id"] = self.id unless self.new_record?
+          self.translations.build(options) unless self.translations.map(&:locale).include?(l.to_s)
+        end
+      end
     end
 
     if options[:reader]
       attrs.each do |name|
         send :define_method, name do
-          unless I18n.default_locale == I18n.locale
-            translation = self.translation(I18n.locale)
-            translation.nil? ? has_translations_options[:nil] : translation.send(name)
+          unless I18n.default_locale == (@locale || I18n.locale)
+            translation = self.translation(@locale || I18n.locale)
+            if translation.nil?
+              if has_translations_options[:fallback]
+                (self[name].nil? || self[name].blank?) ? has_translations_options[:nil] : self[name].set_origins(self,name)
+              else
+                has_translations_options[:nil]
+              end
+            else
+              if @return_raw_data
+                (self[name].nil? || self[name].blank?) ? has_translations_options[:nil] : self[name].set_origins(self,name)
+              else
+                translation.send(name).set_origins(self,name)
+              end
+            end
           else
-            (self[name].nil? || self[name].blank?) ? has_translations_options[:nil] : self[name]
+            (self[name].nil? || self[name].blank?) ? has_translations_options[:nil] : self[name].set_origins(self,name)
           end
         end
       end
     end
 
-    if options[:writer]
-      attrs.each do |name|
-        send :define_method, "#{name}=" do |value|
-          unless I18n.default_locale == I18n.locale
-            translation = find_or_build_translation(I18n.locale, true)
-            translation.send(:"#{name}=", value)
-          else
-            self[name] = value
-          end
-        end
-      end
-    end
+    #FIXME: implement this for update_attributes, save ...
+    #    if options[:writer]
+    #      attrs.each do |name|
+    #        send :define_method, "#{name}=" do |value|
+    #          unless I18n.default_locale == (@locale || I18n.locale)
+    #            translation = find_or_build_translation((@locale || I18n.locale), true)
+    #            translation.send(:"#{name}=", value)
+    #          else
+    #            self[name] = value
+    #          end
+    #        end
+    #      end
+    #    end
 
     has_many :translations, :class_name => translation_class_name, :dependent => :destroy
-    
+    accepts_nested_attributes_for :translations, :allow_destroy => true, :reject_if => proc { |attributes| columns_has_translations.collect{|col| attributes[col.name].blank? ? nil : 1}.compact.empty? }
     translation_class.belongs_to belongs_to
     translation_class.validates_presence_of :locale
     translation_class.validates_uniqueness_of :locale, :scope => :"#{belongs_to}_id"

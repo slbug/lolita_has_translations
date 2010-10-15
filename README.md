@@ -21,10 +21,16 @@ This is a fork of http://github.com/dmitry/has_translations with small changes.
     => "Title in LV"
 
 2. When a "find" is executed and current language is not the same as default language then :translations are added to :includes
-to pre fetch all translations.
+   to pre fetch all translations.
 
 3. The "ModelNameTranslation" class is created for you automaticly with all validations for ranslated fields. Of course you can create it manualy for custom vlidations and other.
 
+4. You dont have to create migration for the translation table, just add a line for every translated model in `db/seed.rb`
+
+    TextPage.sync_translation_table!
+    Blog::Article.sync_translation_table!
+
+   And run `rake db:seed` and it will do it for you. It also updates the table if you add news columns in the `translations :name, :title .....` method.
 
 HasTranslations v0.3.1
 ======================

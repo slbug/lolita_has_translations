@@ -20,6 +20,7 @@ ActiveRecord::Schema.define(:version => 0) do
   create_table :team_translations, :force => true do |t|
     t.references :team, :null => false
     t.string :locale, :null => false, :limit => 2
+    t.string :title
     t.text :text
   end
 end
