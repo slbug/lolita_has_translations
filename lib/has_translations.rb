@@ -127,7 +127,7 @@ class ActiveRecord::Base
               item = self.class.name.sub('Translation','').constantize.new(self.attributes.clone.delete_if{|k,_| !self.class.translate_attrs.include?(k.to_sym)})
               was_table_name = item.class.table_name
               item.class.set_table_name self.class.table_name
-              item.valid?
+              item.valid? rescue
               self.class.translate_attrs.each do |attr|
                 errors_on_attr = item.errors.on(attr)
                 self.errors.add(attr,errors_on_attr) if errors_on_attr
